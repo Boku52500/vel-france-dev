@@ -23,7 +23,7 @@ import {
   type InsertContactMessage,
   type Translation,
   type InsertTranslation,
-} from "@shared/schema";
+} from "../shared/schema";
 import { db } from "./db";
 import { eq, and, desc } from "drizzle-orm";
 

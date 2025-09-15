@@ -4,11 +4,11 @@ import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 import connectPg from "connect-pg-simple";
 import { storage } from "./storage";
-import { loginSchema, registerSchema, type User } from "@shared/schema";
+import { loginSchema, registerSchema, type User } from "../shared/schema";
 
 declare global {
   namespace Express {
-    interface User extends Omit<import("@shared/schema").User, 'password'> {}
+    interface User extends Omit<import("../shared/schema").User, 'password'> {}
   }
 }
 

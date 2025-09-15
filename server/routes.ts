@@ -10,7 +10,7 @@ import {
   insertOrderItemSchema,
   insertNewsletterSchema,
   insertContactMessageSchema
-} from "@shared/schema";
+} from "../shared/schema";
 import { sendOrderNotificationEmail, sendOrderConfirmationToCustomer } from './email';
 
 // Helper function to build language-aware URLs

@@ -23,9 +23,14 @@ DATABASE_URL=postgresql://username:password@host:port/database
 SESSION_SECRET=your-super-secret-key-here
 
 # Email (Optional - for order notifications)
+# For Gmail use App Passwords:
 EMAIL_PROVIDER=gmail
 EMAIL_USER=your-email@gmail.com
-EMAIL_PASSWORD=your-app-password
+EMAIL_APP_PASSWORD=your-gmail-app-password
+# For Outlook/Hotmail, use:
+# EMAIL_PROVIDER=outlook
+# EMAIL_USER=your-email@outlook.com
+# EMAIL_PASSWORD=your-outlook-password
 
 # Payment (Optional - BOG Payment)
 BOG_CLIENT_ID=your-bog-client-id

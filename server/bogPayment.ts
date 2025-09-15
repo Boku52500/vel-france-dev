@@ -77,11 +77,17 @@ class BOGPaymentService {
   private tokenExpiry?: number;
 
   constructor() {
-    // Use official BOG Payment API credentials
-    this.clientId = '10001216';
-    this.clientSecret = 'vNx6Sx1bge5g';
-    
-    console.log('Using BOG Payment API credentials - Client ID:', this.clientId, 'Merchant ID: 00000000981292N');
+    // Read credentials from environment variables for security
+    this.clientId = process.env.BOG_CLIENT_ID || '';
+    this.clientSecret = process.env.BOG_CLIENT_SECRET || '';
+
+    if (!this.clientId || !this.clientSecret) {
+      console.warn(
+        'BOG credentials missing. Set BOG_CLIENT_ID and BOG_CLIENT_SECRET in environment variables.'
+      );
+    } else {
+      console.log('BOG credentials detected. Client ID configured.');
+    }
   }
 
   private async getAccessToken(): Promise<string> {
