@@ -1,5 +1,5 @@
 import express, { type Express } from "express";
-import { registerRoutes } from "../server/routes";
+import { registerRoutes } from "../server/routes.ts";
 
 let app: Express | null = null;
 let initPromise: Promise<void> | null = null;
