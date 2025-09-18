@@ -119,6 +119,11 @@ export default function Footer() {
         <div className="border-t border-gold/20 mt-12 pt-8 text-center">
           <p className="text-gray-600">
             © {currentYear} Vel France. All rights reserved.
+            
+            <div id="top-ge-counter-container" data-site-id="118285"></div>
+            <script async src="//counter.top.ge/counter.js"></script>
+            
+        
           </p>
         </div>
       </div>

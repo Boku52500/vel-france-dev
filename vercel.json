@@ -4,8 +4,14 @@
   "outputDirectory": "dist/public",
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/[...all]" },
+    { "src": "/seo/(.*)", "dest": "/api/[...all]" },
+    { "src": "/sitemap.xml", "dest": "/api/sitemap" },
+    { "src": "/robots.txt", "dest": "/api/robots" },
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/seo/cron", "schedule": "0 3 * * *" }
   ],
   "env": {
     "NODE_ENV": "production"

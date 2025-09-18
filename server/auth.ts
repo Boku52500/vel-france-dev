@@ -32,7 +32,8 @@ export function setupAuth(app: Express) {
   const PostgresSessionStore = connectPg(session);
   const sessionStore = new PostgresSessionStore({
     conString: process.env.DATABASE_URL,
-    createTableIfMissing: true,
+    tableName: 'sessions', // use the Drizzle-managed table name
+    createTableIfMissing: false, // table & index are created via Drizzle migrations
     ttl: 7 * 24 * 60 * 60, // 1 week
   });
 

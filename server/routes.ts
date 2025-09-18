@@ -65,6 +65,40 @@ function getBOGPaymentConfig(paymentMethod: string, totalAmount: number): {
   }
 }
 
+// --- SEO helpers ---
+function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
+}
+
+function renderSeoHtml(page: any, baseUrl: string): string {
+  const title = page.metaTitle || page.title;
+  const description = page.metaDescription || '';
+  const canonical = page.canonicalUrl || `${baseUrl}/seo/${page.slug}`;
+  const jsonLd = page.jsonLd ? `<script type="application/ld+json">${JSON.stringify(page.jsonLd)}</script>` : '';
+  return `<!doctype html>
+  <html lang="${page.language || 'en'}">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <title>${title}</title>
+      <meta name="description" content="${description}" />
+      <link rel="canonical" href="${canonical}" />
+      ${jsonLd}
+    </head>
+    <body>
+      <main>
+        ${page.contentHtml}
+      </main>
+    </body>
+  </html>`;
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Setup custom authentication
   setupAuth(app);
@@ -1062,6 +1096,245 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error creating translation:", error);
       res.status(500).json({ message: "Failed to create translation" });
+    }
+  });
+
+  // --- SEO routes (Starter) ---
+  // Ingest keywords
+  app.post("/api/seo/keywords/ingest", requireAdmin, async (req: any, res) => {
+    try {
+      const { keywords, language = 'en', country = '', intent = 'informational' } = req.body || {};
+      let list: string[] = [];
+      if (Array.isArray(keywords)) list = keywords;
+      else if (typeof keywords === 'string') list = keywords.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
+      if (list.length === 0) return res.status(400).json({ message: 'No keywords provided' });
+
+      const payload = list.map(k => ({ keyword: k, language, country, intent, status: 'pending' }));
+      const result = await storage.bulkInsertSeoKeywords(payload as any);
+      res.json({ ingested: result.length });
+    } catch (error: any) {
+      console.error('Error ingesting SEO keywords:', error);
+      res.status(500).json({ message: 'Failed to ingest keywords' });
+    }
+  });
+
+  // Generate pages for pending keywords (simple template) and optionally publish
+  app.post("/api/seo/pages/generate", requireAdmin, async (req: any, res) => {
+    try {
+      const { limit = 10, autopublish = false, language = 'en' } = req.body || {};
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      const pending = await storage.getPendingSeoKeywords(Math.max(1, Math.min(100, limit)));
+      const created: any[] = [];
+
+      for (const kw of pending) {
+        try {
+          // Resolve unique slug
+          let baseSlug = slugify(kw.keyword);
+          if (!baseSlug) baseSlug = `kw-${kw.id.slice(0,6)}`;
+          let slug = baseSlug;
+          let i = 2;
+          while (await storage.getSeoPageBySlug(slug)) {
+            slug = `${baseSlug}-${i++}`;
+          }
+
+          const title = `${kw.keyword} — Guide`;
+          const metaTitle = title;
+          const metaDescription = `Everything about ${kw.keyword}. Learn key facts, tips, and best practices.`;
+          const canonicalUrl = `${baseUrl}/seo/${slug}`;
+          const contentHtml = `
+            <article>
+              <h1>${kw.keyword}</h1>
+              <p>This page covers "${kw.keyword}" with practical guidance, definitions, and FAQs.</p>
+              <h2>Overview</h2>
+              <p>${kw.keyword} explained in simple terms for quick understanding.</p>
+              <h2>Key Points</h2>
+              <ul>
+                <li>Definition and context for ${kw.keyword}.</li>
+                <li>Actionable tips related to ${kw.keyword}.</li>
+                <li>Related topics and terms.</li>
+              </ul>
+              <h2>FAQ</h2>
+              <p><strong>What is ${kw.keyword}?</strong> A concise explanation tailored for beginners.</p>
+            </article>
+          `;
+
+          const jsonLd = {
+            '@context': 'https://schema.org',
+            '@type': 'Article',
+            headline: metaTitle,
+            inLanguage: language,
+            mainEntityOfPage: canonicalUrl,
+            datePublished: new Date().toISOString(),
+          };
+
+          const page = await storage.createSeoPage({
+            keywordId: kw.id,
+            slug,
+            language,
+            title,
+            metaTitle,
+            metaDescription,
+            canonicalUrl,
+            contentHtml,
+            jsonLd: jsonLd as any,
+            status: autopublish ? 'published' : 'draft',
+          } as any);
+
+          if (autopublish) {
+            await storage.publishSeoPage(page.id);
+            await storage.setSeoKeywordStatus(kw.id, 'published');
+          } else {
+            await storage.setSeoKeywordStatus(kw.id, 'drafted');
+          }
+
+          created.push({ id: page.id, slug, status: autopublish ? 'published' : 'draft' });
+        } catch (innerErr: any) {
+          console.error('Failed to generate page for keyword', kw.keyword, innerErr);
+          await storage.setSeoKeywordStatus(kw.id, 'error', innerErr?.message || 'unknown');
+        }
+      }
+
+      res.json({ created });
+    } catch (error) {
+      console.error('Error generating SEO pages:', error);
+      res.status(500).json({ message: 'Failed to generate pages' });
+    }
+  });
+
+  // Serve SEO pages as HTML
+  app.get('/seo/:slug', async (req, res) => {
+    try {
+      const page = await storage.getSeoPageBySlug(req.params.slug);
+      if (!page || page.status !== 'published') return res.status(404).send('Not Found');
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      const html = renderSeoHtml(page, baseUrl);
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=600');
+      return res.status(200).send(html);
+    } catch (error) {
+      console.error('Error serving SEO page:', error);
+      return res.status(500).send('Server Error');
+    }
+  });
+
+  // Sitemap XML including published SEO pages
+  app.get('/api/sitemap', async (req, res) => {
+    try {
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      const pages = await storage.listPublishedSeoPages();
+      const urls = [
+        `${baseUrl}/`,
+        ...pages.map((p: any) => `${baseUrl}/seo/${p.slug}`),
+      ];
+      const lastmods: Record<string, string> = {};
+      for (const p of pages as any[]) {
+        if (p.publishedAt) lastmods[`${baseUrl}/seo/${p.slug}`] = new Date(p.publishedAt).toISOString();
+      }
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+      <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+        ${urls.map(u => `<url><loc>${u}</loc>${lastmods[u] ? `<lastmod>${lastmods[u]}</lastmod>` : ''}</url>`).join('')}
+      </urlset>`;
+      res.setHeader('Content-Type', 'application/xml');
+      res.status(200).send(xml);
+    } catch (error) {
+      console.error('Error generating sitemap:', error);
+      res.status(500).send('');
+    }
+  });
+
+  // Robots.txt
+  app.get('/api/robots', async (req, res) => {
+    try {
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      const text = `User-agent: *\nAllow: /\nSitemap: ${baseUrl}/sitemap.xml\n`;
+      res.setHeader('Content-Type', 'text/plain');
+      res.status(200).send(text);
+    } catch (error) {
+      res.setHeader('Content-Type', 'text/plain');
+      res.status(200).send('User-agent: *\nAllow: /');
+    }
+  });
+
+  // Cron endpoint for automated generation/publishing
+  app.post('/api/seo/cron', async (req, res) => {
+    try {
+      const headerToken = req.get('x-cron-token') || (req.query.token as string) || '';
+      if (process.env.SEO_CRON_TOKEN && headerToken !== process.env.SEO_CRON_TOKEN) {
+        return res.status(401).json({ message: 'Unauthorized' });
+      }
+      const limit = Number(process.env.SEO_CRON_LIMIT || 10);
+      const language = process.env.SEO_LANGUAGE || 'en';
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      const pending = await storage.getPendingSeoKeywords(Math.max(1, Math.min(100, limit)));
+      const created: any[] = [];
+
+      for (const kw of pending) {
+        try {
+          let baseSlug = slugify(kw.keyword);
+          if (!baseSlug) baseSlug = `kw-${kw.id.slice(0,6)}`;
+          let slug = baseSlug;
+          let i = 2;
+          while (await storage.getSeoPageBySlug(slug)) {
+            slug = `${baseSlug}-${i++}`;
+          }
+
+          const title = `${kw.keyword} — Guide`;
+          const metaTitle = title;
+          const metaDescription = `Everything about ${kw.keyword}. Learn key facts, tips, and best practices.`;
+          const canonicalUrl = `${baseUrl}/seo/${slug}`;
+          const contentHtml = `
+            <article>
+              <h1>${kw.keyword}</h1>
+              <p>This page covers "${kw.keyword}" with practical guidance, definitions, and FAQs.</p>
+              <h2>Overview</h2>
+              <p>${kw.keyword} explained in simple terms for quick understanding.</p>
+              <h2>Key Points</h2>
+              <ul>
+                <li>Definition and context for ${kw.keyword}.</li>
+                <li>Actionable tips related to ${kw.keyword}.</li>
+                <li>Related topics and terms.</li>
+              </ul>
+              <h2>FAQ</h2>
+              <p><strong>What is ${kw.keyword}?</strong> A concise explanation tailored for beginners.</p>
+            </article>
+          `;
+
+          const jsonLd = {
+            '@context': 'https://schema.org',
+            '@type': 'Article',
+            headline: metaTitle,
+            inLanguage: language,
+            mainEntityOfPage: canonicalUrl,
+            datePublished: new Date().toISOString(),
+          };
+
+          const page = await storage.createSeoPage({
+            keywordId: kw.id,
+            slug,
+            language,
+            title,
+            metaTitle,
+            metaDescription,
+            canonicalUrl,
+            contentHtml,
+            jsonLd: jsonLd as any,
+            status: 'published',
+          } as any);
+
+          await storage.publishSeoPage(page.id);
+          await storage.setSeoKeywordStatus(kw.id, 'published');
+
+          created.push({ id: page.id, slug, status: 'published' });
+        } catch (innerErr: any) {
+          console.error('Cron failed for keyword', kw.keyword, innerErr);
+          await storage.setSeoKeywordStatus(kw.id, 'error', innerErr?.message || 'unknown');
+        }
+      }
+
+      res.json({ created, ranAt: new Date().toISOString() });
+    } catch (error) {
+      console.error('Cron error:', error);
+      res.status(500).json({ message: 'Cron failed' });
     }
   });
 

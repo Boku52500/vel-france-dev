@@ -7,6 +7,8 @@ import {
   newsletters,
   contactMessages,
   translations,
+  seoKeywords,
+  seoPages,
   type User,
   type InsertUser,
   type Product,
@@ -23,6 +25,10 @@ import {
   type InsertContactMessage,
   type Translation,
   type InsertTranslation,
+  type SeoKeyword,
+  type InsertSeoKeyword,
+  type SeoPage,
+  type InsertSeoPage,
 } from "../shared/schema";
 import { db } from "./db";
 import { eq, and, desc } from "drizzle-orm";
@@ -82,6 +88,15 @@ export interface IStorage {
   createTranslation(translation: InsertTranslation): Promise<Translation>;
   updateTranslation(key: string, georgianText: string): Promise<Translation | undefined>;
   bulkCreateTranslations(translations: InsertTranslation[]): Promise<Translation[]>;
+
+  // SEO operations
+  bulkInsertSeoKeywords(keywords: InsertSeoKeyword[]): Promise<SeoKeyword[]>;
+  getPendingSeoKeywords(limit: number): Promise<SeoKeyword[]>;
+  setSeoKeywordStatus(id: string, status: string, errorMessage?: string): Promise<SeoKeyword | undefined>;
+  createSeoPage(page: InsertSeoPage): Promise<SeoPage>;
+  getSeoPageBySlug(slug: string): Promise<SeoPage | undefined>;
+  publishSeoPage(id: string): Promise<SeoPage | undefined>;
+  listPublishedSeoPages(): Promise<SeoPage[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -503,6 +518,79 @@ export class DatabaseStorage implements IStorage {
     }
     
     return results;
+  }
+
+  // --- SEO operations ---
+  async bulkInsertSeoKeywords(keywordList: InsertSeoKeyword[]): Promise<SeoKeyword[]> {
+    const results: SeoKeyword[] = [];
+    for (const kw of keywordList) {
+      try {
+        const [inserted] = await db.insert(seoKeywords).values(kw).returning();
+        results.push(inserted);
+      } catch (error) {
+        // On duplicate, update basics and reset status to pending
+        const [updated] = await db
+          .update(seoKeywords)
+          .set({
+            language: kw.language ?? "en",
+            country: kw.country ?? "",
+            intent: kw.intent ?? "informational",
+            difficulty: kw.difficulty ?? null,
+            volume: kw.volume ?? null,
+            status: kw.status ?? "pending",
+            updatedAt: new Date(),
+          })
+          .where(eq(seoKeywords.keyword, kw.keyword))
+          .returning();
+        if (updated) results.push(updated);
+      }
+    }
+    return results;
+  }
+
+  async getPendingSeoKeywords(limitCount: number): Promise<SeoKeyword[]> {
+    return await db
+      .select()
+      .from(seoKeywords)
+      .where(eq(seoKeywords.status, "pending"))
+      .orderBy(seoKeywords.createdAt as any)
+      .limit(limitCount);
+  }
+
+  async setSeoKeywordStatus(id: string, status: string, errorMessage?: string): Promise<SeoKeyword | undefined> {
+    const [updated] = await db
+      .update(seoKeywords)
+      .set({ status, errorMessage: errorMessage || null, updatedAt: new Date() })
+      .where(eq(seoKeywords.id, id))
+      .returning();
+    return updated;
+  }
+
+  async createSeoPage(page: InsertSeoPage): Promise<SeoPage> {
+    const [created] = await db.insert(seoPages).values(page).returning();
+    return created;
+  }
+
+  async getSeoPageBySlug(slug: string): Promise<SeoPage | undefined> {
+    const [page] = await db.select().from(seoPages).where(eq(seoPages.slug, slug));
+    return page;
+  }
+
+  async publishSeoPage(id: string): Promise<SeoPage | undefined> {
+    const [updated] = await db
+      .update(seoPages)
+      .set({ status: "published", publishedAt: new Date(), updatedAt: new Date() })
+      .where(eq(seoPages.id, id))
+      .returning();
+    return updated;
+  }
+
+  async listPublishedSeoPages(): Promise<SeoPage[]> {
+    return await db
+      .select()
+      .from(seoPages)
+      .where(eq(seoPages.status, "published"))
+      .orderBy(desc(seoPages.publishedAt as any));
   }
 }
 

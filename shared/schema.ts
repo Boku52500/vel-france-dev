@@ -69,7 +69,7 @@ export const cartItems = pgTable("cart_items", {
 // Orders table
 export const orders = pgTable("orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  orderCode: varchar("order_code", { length: 20 }).unique().notNull(), // Unique readable order code
+  orderCode: varchar("order_code", { length: 50 }).unique().notNull(), // Unique readable order code
   userId: varchar("user_id").references(() => users.id),
   status: varchar("status", { length: 50 }).notNull().default("pending"), // 'pending', 'confirmed', 'shipped', 'delivered'
   total: decimal("total", { precision: 10, scale: 2 }).notNull(),
@@ -231,6 +231,74 @@ export const insertTranslationSchema = createInsertSchema(translations).omit({
   updatedAt: true,
 });
 
+// --- SEO automation tables ---
+export const seoKeywords = pgTable(
+  "seo_keywords",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    keyword: text("keyword").notNull().unique(),
+    language: varchar("language", { length: 10 }).notNull().default("en"),
+    country: varchar("country", { length: 10 }).default(""),
+    intent: varchar("intent", { length: 32 }).default("informational"),
+    difficulty: integer("difficulty"),
+    volume: integer("volume"),
+    status: varchar("status", { length: 20 }).notNull().default("pending"), // pending | drafted | published | noindex | error
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [index("IDX_seo_keywords_status").on(table.status)]
+);
+
+export const seoPages = pgTable(
+  "seo_pages",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    keywordId: varchar("keyword_id").references(() => seoKeywords.id, { onDelete: "set null" }),
+    slug: varchar("slug", { length: 255 }).notNull().unique(),
+    language: varchar("language", { length: 10 }).notNull().default("en"),
+    title: varchar("title", { length: 255 }).notNull(),
+    metaTitle: varchar("meta_title", { length: 255 }),
+    metaDescription: varchar("meta_description", { length: 500 }),
+    canonicalUrl: varchar("canonical_url", { length: 500 }),
+    contentHtml: text("content_html").notNull(),
+    jsonLd: jsonb("json_ld"),
+    status: varchar("status", { length: 20 }).notNull().default("draft"), // draft | published | noindex
+    publishedAt: timestamp("published_at"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_seo_pages_status").on(table.status),
+    index("IDX_seo_pages_language").on(table.language),
+  ]
+);
+
+export const seoKeywordsRelations = relations(seoKeywords, ({ many }) => ({
+  pages: many(seoPages),
+}));
+
+export const seoPagesRelations = relations(seoPages, ({ one }) => ({
+  keyword: one(seoKeywords, {
+    fields: [seoPages.keywordId],
+    references: [seoKeywords.id],
+  }),
+}));
+
+// Insert schemas
+export const insertSeoKeywordSchema = createInsertSchema(seoKeywords).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertSeoPageSchema = createInsertSchema(seoPages).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  publishedAt: true,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -250,3 +318,7 @@ export type ContactMessage = typeof contactMessages.$inferSelect;
 export type InsertContactMessage = z.infer<typeof insertContactMessageSchema>;
 export type Translation = typeof translations.$inferSelect;
 export type InsertTranslation = z.infer<typeof insertTranslationSchema>;
+export type SeoKeyword = typeof seoKeywords.$inferSelect;
+export type InsertSeoKeyword = z.infer<typeof insertSeoKeywordSchema>;
+export type SeoPage = typeof seoPages.$inferSelect;
+export type InsertSeoPage = z.infer<typeof insertSeoPageSchema>;
